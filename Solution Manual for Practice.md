@@ -6548,4 +6548,824 @@ $$
 
 
 ---
-Powered by [ChatGPT Exporter](https://www.chatgptexporter.com)
+
+---
+# Rounding cases you should definitely study
+
+| Case | What it tests | Priority |
+|---|---|---|
+| 12 | Exactly halfway → even LSB → round down | ⭐⭐⭐ |
+| 13 | Exactly halfway → odd LSB → round up | ⭐⭐⭐ |
+| 14 | Rounding creates exponent carry → overflow | ⭐⭐⭐ |
+| **15** | Less than half → round down | ⭐⭐⭐ |
+| **16** | Greater than half → round up | ⭐⭐⭐ |
+| **17** | Rounding creates exponent carry but **doesn't** overflow | ⭐⭐⭐ |
+| **18** | Maximum finite + values around rounding boundary | ⭐⭐⭐ |
+| **19** | Guard/round/sticky-bit combinations | ⭐⭐⭐ |
+| **20** | Rounding near the normal/subnormal boundary | ⭐⭐ |
+| **21** | Exact result requiring no rounding | ⭐⭐ |
+| **22** | Rounding produces zero / signed-zero behavior | ⭐⭐ |
+
+Your existing 12–14 are excellent, but **15–19 are the ones I'd add immediately**.
+
+---
+
+# 15. Less-than-half → round downward
+
+This is the counterpart to Example 12.
+
+Take:
+
+$$
+\boxed{1.0+2^{-12}}
+$$
+
+Since:
+
+$$
+2^{-12}=0.000244140625
+$$
+
+the exact result is:
+
+$$
+1.000244140625
+$$
+
+Around $1.0$, the spacing between two FP16 numbers is:
+
+$$
+2^{-10}=0.0009765625
+$$
+
+Half an ULP is:
+
+$$
+2^{-11}=0.00048828125
+$$
+
+But our added value is:
+
+$$
+2^{-12}=0.000244140625
+$$
+
+which is **less than half an ULP**.
+
+Therefore it must round downward to:
+
+$$
+\boxed{1.0}
+$$
+
+### Encodings
+
+$$
+XA=0|01111|0000000000
+$$
+
+For $2^{-12}$:
+
+$$
+E=-12
+$$
+
+$$
+E_{\text{stored}}=-12+15=3=00011
+$$
+
+so:
+
+$$
+XB=0|00011|0000000000
+$$
+
+After alignment:
+
+```text
+1.000000000000
+0.000000000001
+----------------
+1.000000000001
+```
+
+Only the first 10 fraction bits are retained:
+
+```text
+1.0000000000 | 01...
+             ↑
+          less than half
+```
+
+Therefore:
+
+$$
+\boxed{RESULT=0|01111|0000000000=1.0}
+$$
+
+---
+
+# 16. Greater-than-half → round upward
+
+Now use:
+
+$$
+\boxed{1.0+0.000732421875}
+$$
+
+Notice:
+
+$$
+0.000732421875=1.5\times2^{-11}
+$$
+
+and:
+
+$$
+2^{-11}=0.00048828125
+$$
+
+Therefore:
+
+$$
+0.000732421875>\frac12\text{ ULP}
+$$
+
+The exact result is:
+
+$$
+1.000732421875
+$$
+
+After alignment:
+
+```text
+1.00000000000
+0.00000000011
+----------------
+1.00000000011
+```
+
+We retain:
+
+```text
+1.0000000001 | 1...
+```
+
+Since the discarded part is **greater than half**, round upward:
+
+$$
+1.0000000001_2
+$$
+
+which is:
+
+$$
+\boxed{1.0009765625}
+$$
+
+### Input encoding
+
+Since:
+
+$$
+0.000732421875=1.1_2\times2^{-11}
+$$
+
+we have:
+
+$$
+\boxed{XB=0|00100|1000000000}
+$$
+
+Final:
+
+$$
+\boxed{RESULT=0|01111|0000000001}
+$$
+
+---
+
+# 17. Rounding causes exponent carry — but NOT overflow
+
+This is an extremely useful case because it separates **"rounding carry"** from **"overflow caused by rounding."**
+
+Use:
+
+$$
+\boxed{1023.5+0.25=1023.75}
+$$
+
+Around $1024$, the relevant spacing is:
+
+$$
+0.5
+$$
+
+So:
+
+$$
+0.25
+$$
+
+is exactly half an ULP.
+
+The representation of $1023.5$ is:
+
+$$
+1023.5
+=
+1.1111111111_2\times2^9
+$$
+
+Thus:
+
+$$
+XA=
+\boxed{0|11000|1111111111}
+$$
+
+because:
+
+$$
+9+15=24=11000_2
+$$
+
+And:
+
+$$
+0.25=1.0\times2^{-2}
+$$
+
+so:
+
+$$
+XB=\boxed{0|01101|0000000000}
+$$
+
+After alignment:
+
+```text
+1.11111111110
+0.00000000001
+--------------
+1.11111111111
+```
+
+This is exactly halfway.
+
+The retained LSB is:
+
+$$
+1
+$$
+
+so RNE rounds upward:
+
+```text
+1111111111 + 1
+=10000000000
+```
+
+That produces an exponent carry:
+
+$$
+1.1111111111\times2^9
+\rightarrow
+1.0000000000\times2^{10}
+$$
+
+Therefore:
+
+$$
+1023.75\rightarrow1024
+$$
+
+And **1024 is still representable**.
+
+Stored exponent:
+
+$$
+10+15=25
+$$
+
+$$
+25=11001_2
+$$
+
+So:
+
+$$
+\boxed{RESULT=0|11001|0000000000}
+$$
+
+This is:
+
+$$
+\boxed{1024}
+$$
+
+### Why this is important
+
+Compare:
+
+**Example 17:**
+
+$$
+\boxed{\text{rounding carry}\rightarrow\text{new exponent}\rightarrow\text{still finite}}
+$$
+
+**Example 14:**
+
+$$
+\boxed{\text{rounding carry}\rightarrow\text{new exponent}\rightarrow\text{overflow}}
+$$
+
+This distinction is very useful when debugging your circuit.
+
+---
+
+# 18. Maximum finite value: below / at / above the rounding boundary
+
+I strongly recommend testing **three consecutive cases** around the maximum finite number.
+
+The maximum finite value is:
+
+$$
+\boxed{65504}
+$$
+
+Its ULP is:
+
+$$
+32
+$$
+
+Therefore the halfway point to the next exponent level is:
+
+$$
+\frac{32}{2}=16
+$$
+
+So test:
+
+### A. Below halfway
+
+$$
+\boxed{65504+15=65519}
+$$
+
+Since:
+
+$$
+15<16
+$$
+
+it rounds back to:
+
+$$
+\boxed{65504}
+$$
+
+---
+
+### B. Exactly halfway
+
+$$
+\boxed{65504+16=65520}
+$$
+
+This is your Example 14.
+
+Because the maximum finite significand has an odd LSB:
+
+```text
+1111111111
+          ↑
+          1
+```
+
+RNE chooses the upper candidate.
+
+But the upper candidate would require exponent $16$, which is outside the finite range.
+
+Therefore:
+
+$$
+\boxed{65520\rightarrow+\infty}
+$$
+
+---
+
+### C. Above halfway
+
+$$
+\boxed{65504+17=65521}
+$$
+
+Since:
+
+$$
+17>16
+$$
+
+it definitely rounds upward.
+
+Again the next representable value would require exponent $16$, so:
+
+$$
+\boxed{65521\rightarrow+\infty}
+$$
+
+This gives you a fantastic three-case test:
+
+$$
+\boxed{
+\begin{array}{ccc}
+65504+15 &\rightarrow&65504\\
+65504+16 &\rightarrow&+\infty\\
+65504+17 &\rightarrow&+\infty
+\end{array}}
+$$
+
+---
+
+# 19. Guard, Round, Sticky bits
+
+This is probably the **most important hardware-level rounding concept** you should study.
+
+When you have more bits than your 10-bit fraction can hold, the usual hardware terminology is:
+
+$$
+\boxed{G=\text{Guard},\quad R=\text{Round},\quad S=\text{Sticky}}
+$$
+
+Suppose the significand looks like:
+
+```text
+1 . FFFFFFFFFF | G | R | S
+                ↑   ↑   ↑
+                G   R   S
+```
+
+The decision for RNE can be summarized as:
+
+| G | R | S | Meaning | Action |
+|---|---|---|---|---|
+| 0 | 0 | 0 | Exact | Down/stay |
+| 0 | 0 | 1 | Less than half | Down |
+| 0 | 1 | 0/1 | Less than half | Down |
+| 1 | 0 | 0 | **Exactly half** | Check LSB |
+| 1 | 0 | 1 | Greater than half | Up |
+| 1 | 1 | 0/1 | Greater than half | Up |
+
+The most important rule is:
+
+$$
+\boxed{\text{Round up if }G=1\text{ and }(R=1\text{ or }S=1)}
+$$
+
+For the exact halfway case:
+
+$$
+\boxed{G=1,\ R=0,\ S=0}
+$$
+
+then look at the retained LSB.
+
+If:
+
+$$
+LSB=0
+$$
+
+stay.
+
+If:
+
+$$
+LSB=1
+$$
+
+increment.
+
+---
+
+# 20. Why the Sticky bit matters
+
+This is a very common hardware-viva question.
+
+Suppose you have:
+
+```text
+1.XXXXXXXXXX | 1 | 0 | 0
+```
+
+That's exactly halfway.
+
+But suppose:
+
+```text
+1.XXXXXXXXXX | 1 | 0 | 1
+```
+
+The `1` in the sticky position means there are additional nonzero bits after the halfway bit.
+
+Therefore this is **greater than half**, not exactly half.
+
+So:
+
+```text
+G=1 R=0 S=0
+```
+
+means:
+
+$$
+\boxed{\text{exactly half}}
+$$
+
+but:
+
+```text
+G=1 R=0 S=1
+```
+
+means:
+
+$$
+\boxed{\text{greater than half}}
+$$
+
+This is why a sticky bit is essential.
+
+---
+
+# 21. Exact result — no rounding at all
+
+You should also test cases where the result fits perfectly.
+
+For example:
+
+$$
+\boxed{1.5+0.5=2.0}
+$$
+
+Represent:
+
+$$
+1.5=1.1_2\times2^0
+$$
+
+and:
+
+$$
+0.5=1.0_2\times2^{-1}
+$$
+
+After alignment:
+
+```text
+1.1000000000
+0.1000000000
+--------------
+10.0000000000
+```
+
+Normalize:
+
+$$
+1.0000000000\times2^1
+$$
+
+So:
+
+$$
+\boxed{RESULT=0|10000|0000000000}
+$$
+
+This tests that the circuit doesn't accidentally assert rounding flags when there are no discarded nonzero bits.
+
+---
+
+# 22. Rounding to zero / very small results
+
+You should also understand the possibility that a tiny exact result can round to zero.
+
+Conceptually, if the exact result were:
+
+$$
+\boxed{2^{-25}}
+$$
+
+the two nearest representable values would be:
+
+$$
+0
+$$
+
+and:
+
+$$
+2^{-24}
+$$
+
+because $2^{-24}$ is the smallest positive subnormal.
+
+The exact result is halfway:
+
+$$
+2^{-25}
+=
+\frac{0+2^{-24}}2
+$$
+
+For round-to-nearest-even:
+
+$$
+0
+$$
+
+has an even significand/LSB, while the minimum subnormal has an odd LSB.
+
+Therefore:
+
+$$
+\boxed{2^{-25}\rightarrow0}
+$$
+
+This particular exact value **cannot arise from an exact operation on two already-represented FP16 operands** in the same way as your other examples, because FP16 operands themselves lie on the $2^{-24}$ grid near zero. But it is an excellent **rounding-unit/testbench case** if your internal datapath can produce such an intermediate value.
+
+---
+
+# One more thing: Underflow + rounding
+
+This is worth knowing for your viva.
+
+There are actually two related concepts:
+
+### Exact result is tiny
+
+For example:
+
+$$
+2^{-16}
+$$
+
+Your Example 10 demonstrates this:
+
+$$
+\boxed{2^{-16}}
+$$
+
+which becomes a subnormal.
+
+### Exact result is even tinier
+
+If the exact result lies below the smallest subnormal, it may round to:
+
+$$
+\boxed{0}
+$$
+
+So don't think:
+
+> "Underflow always means the result becomes zero."
+
+That's **not true**.
+
+Underflow can produce:
+
+$$
+\boxed{\text{a nonzero subnormal}}
+$$
+
+or:
+
+$$
+\boxed{0}
+$$
+
+depending on the magnitude and rounding.
+
+---
+
+# Your complete rounding study set
+
+If I were preparing your FP16 adder for a **viva + hardware testing**, I'd make sure you can explain these:
+
+### Basic rounding
+
+**12. Halfway → even → down**
+
+$$
+1.0+2^{-11}\rightarrow1.0
+$$
+
+**13. Halfway → odd → up**
+
+$$
+1.0009765625+2^{-11}
+\rightarrow1.001953125
+$$
+
+**15. Less than half → down**
+
+$$
+1.0+2^{-12}\rightarrow1.0
+$$
+
+**16. Greater than half → up**
+
+$$
+1.0+1.5\times2^{-11}
+\rightarrow1.0009765625
+$$
+
+### Exponent/carry interaction
+
+**17. Rounding carry, but finite**
+
+$$
+1023.5+0.25\rightarrow1024
+$$
+
+**14. Rounding carry causes overflow**
+
+$$
+65504+16\rightarrow+\infty
+$$
+
+**18. Maximum boundary**
+
+$$
+\begin{aligned}
+65504+15&\rightarrow65504\\
+65504+16&\rightarrow+\infty\\
+65504+17&\rightarrow+\infty
+\end{aligned}
+$$
+
+### Subnormal interaction
+
+**10. Normal → subnormal**
+
+$$
+2^{-16}\rightarrow\text{subnormal}
+$$
+
+**11. Smallest positive subnormal**
+
+$$
+\boxed{2^{-24}}
+$$
+
+**22. Tiny result → zero**
+
+$$
+2^{-25}\rightarrow0
+$$
+
+### Hardware rounding logic
+
+Be able to explain:
+
+$$
+\boxed{G,R,S}
+$$
+
+and especially:
+
+$$
+\boxed{
+G=1,\ R=0,\ S=0
+\Rightarrow\text{exact halfway}
+}
+$$
+
+and:
+
+$$
+\boxed{
+G=1\land(R\lor S)=1
+\Rightarrow\text{round up}
+}
+$$
+
+---
+
+## ⭐ If you have limited time
+
+The **five additional cases I'd prioritize** are:
+
+1. **Less than half → down**
+2. **Greater than half → up**
+3. **Rounding carry without overflow**
+4. **Maximum finite: below/at/above the rounding boundary**
+5. **Guard/Round/Sticky-bit decision table**
+
+Together with your existing **12, 13, and 14**, those give you a very strong understanding of the rounding behavior of your FP16 adder.
+
+
+
+---
